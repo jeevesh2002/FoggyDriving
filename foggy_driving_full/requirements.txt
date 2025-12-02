@@ -1,5 +1,8 @@
 gymnasium
-matplotlib
-stable-baselines3
 imageio
+matplotlib
 numpy
+stable-baselines3
+tensorboard
+torch
+tqdm
