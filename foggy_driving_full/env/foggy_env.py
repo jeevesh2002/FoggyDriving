@@ -94,8 +94,15 @@ class FoggyDriving(gym.Env):
             else:
                 self.cars.append(self._spawn_car(10.0, self.grid_height))
 
+        # Spawn a few cars closer but ensure they're not all in ego lane and have reasonable speeds
         for i in range(3):
-          self.cars.append({"lane": self.ego_lane, "dist": self.rng.uniform(2, 4), "speed": self.min_speed})
+            # Random lane (not always ego lane)
+            lane = int(self.rng.randint(0, self.num_lanes))
+            # Spawn further away (5-8 instead of 2-4) to give more reaction time
+            dist = float(self.rng.uniform(5, 8))
+            # Use speed closer to ego speed or slightly slower, not minimum
+            speed = float(self.rng.uniform(self.min_speed + 0.5, self.ego_speed))
+            self.cars.append({"lane": lane, "dist": dist, "speed": speed})
 
         obs = self._get_obs().astype(np.float32)
         return obs, {}

@@ -79,6 +79,7 @@ class FoggyDrivingTrainer:
                 gamma=0.99,
                 vf_coef=0.5,
                 tensorboard_log=self.tb_log_dir,
+                device='cuda',
                 verbose=1
             )
 
@@ -93,6 +94,7 @@ class FoggyDrivingTrainer:
                 vf_coef=0.5,
                 max_grad_norm=0.5,
                 tensorboard_log=self.tb_log_dir,
+                device='cuda',
                 verbose=1
             )
 
@@ -112,6 +114,7 @@ class FoggyDrivingTrainer:
                 exploration_final_eps=0.05,
                 max_grad_norm=10,
                 tensorboard_log=self.tb_log_dir,
+                device='cuda',
                 verbose=1
             )
 
