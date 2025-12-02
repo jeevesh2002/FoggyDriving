@@ -4,7 +4,7 @@ import math
 import gymnasium as gym
 from gymnasium import spaces
 import numpy as np
-from typing import Dict, List
+from typing import Dict, List, Optional
 from .renderer import FoggyDrivingRender
 
 
@@ -64,6 +64,12 @@ class FoggyDriving(gym.Env):
 
         self.rng = np.random.RandomState()
 
+        # Probability of spawning a new car in each lane near the top per step
+        self.spawn_prob_per_lane = 0.2
+        # Minimum vertical gap between the furthest car in a lane and a new spawn
+        self.min_spawn_gap = 5.0
+        # How far beyond the visible area we still keep cars before despawning
+        self.despawn_margin = 5.0
 
         self.ego_lane = 1
         self.step_count = 0
@@ -94,11 +100,14 @@ class FoggyDriving(gym.Env):
         obs = self._get_obs().astype(np.float32)
         return obs, {}
 
-    def _spawn_car(self, dmin: float, dmax: float, smax: int = None) -> Dict[str, float]:
+    def _spawn_car(self, dmin: float, dmax: float, smax: int = None, lane: Optional[int] = None) -> Dict[str, float]:
         if smax is None:
             smax = self.max_speed
 
-        lane = int(self.rng.randint(0, self.num_lanes))
+        if lane is None:
+            lane = int(self.rng.randint(0, self.num_lanes))
+        else:
+            lane = int(lane)
         dist = float(self.rng.uniform(dmin, dmax))
 
         p_fast = 0.1         
@@ -124,25 +133,52 @@ class FoggyDriving(gym.Env):
             if self.rng.rand() < 0.05:
                 c["speed"] = max(self.min_speed, c["speed"] - 2)
             if self.rng.rand() < 0.05 and c["dist"]>3:
-                c["lane"] = 1-c["lane"]
+                delta_lane = int(self.rng.choice([-1, +1]))
+                target_lane = c["lane"] + delta_lane
+                if 0 <= target_lane < self.num_lanes:
+                     # "only if empty" switch: no car too close in that lane
+                    safe = True
+                    for other in self.cars:
+                        if other is c or other["lane"] != target_lane:
+                            continue
+                        # If another car is within 2 units ahead/behind, block the lane change
+                        if abs(other["dist"] - c["dist"]) < 2.0:
+                            safe = False
+                            break
+                    if safe:
+                        c["lane"] = target_lane
 
-        new_cars = []
+        # Move cars in ego frame and despawn those far outside the window
+        new_cars: List[Dict[str, float]] = []
+        upper_limit = self.grid_height + self.despawn_margin
+        lower_limit = -self.despawn_margin
+
         for c in self.cars:
             rel_speed = self.ego_speed - c["speed"]
             c["dist"] -= rel_speed
-            if c["dist"] > -1:
+
+            if lower_limit < c["dist"] < upper_limit:
                 new_cars.append(c)
         self.cars = new_cars
 
-        if self.rng.rand() < 0.1:
-            self.cars.append(
-                self._spawn_car(self.grid_height, self.grid_height+5,self.min_speed+1)
-            )
+        # Spawn new cars per lane near the top of the visible region
+        visible_top = min(self.grid_height, self.max_range_by_fog[self.fog])
+        spawn_base = visible_top
 
-        if self.rng.rand() < 0.1:
-            self.cars.append(
-                self._spawn_car(self.max_range_by_fog[self.fog], self.grid_height, self.max_speed-1)
-            )
+        for lane in range(self.num_lanes):
+            # Cars in this lane that are ahead of the ego
+            lane_cars = [c for c in self.cars if c["lane"] == lane and c["dist"] >= 0.0]
+            furthest = max((c["dist"] for c in lane_cars), default=0.0)
+
+            free_gap = spawn_base - furthest
+
+            # Only spawn if there is a reasonable gap and with some probability
+            if free_gap >= self.min_spawn_gap and self.rng.rand() < self.spawn_prob_per_lane:
+                dmin = spawn_base
+                dmax = spawn_base + self.min_spawn_gap
+                new_car = self._spawn_car(dmin, dmax, lane=lane)
+                self.cars.append(new_car)
+
 
     def _lidar(self) -> np.ndarray:
         max_r = self.max_range_by_fog[self.fog]
